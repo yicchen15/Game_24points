@@ -209,52 +209,52 @@ with tab1:
                     st.rerun()
 
 # ------------------------------------------
-# 分頁 2: 解牌計算機 (新功能)
+# 分頁 2: 解牌計算機 (優化四個空格輸入)
 # ------------------------------------------
 with tab2:
     st.markdown("### 🧮 自定義解牌器")
-    st.caption("輸入手上的牌，幫你算出算式。")
+    st.caption("請在下方四個空格分別輸入牌面 (A, 2-10, J, Q, K)")
     
-    sc1, sc2 = st.columns([1, 2])
+    # 目標點數設定
+    solver_target = st.number_input("目標點數", value=24, step=1, key="s_target_input")
     
-    with sc1:
-        solver_target = st.number_input("目標點數", value=24, step=1, key="s_target")
+    # 建立四個橫向排列的輸入框
+    input_cols = st.columns(4)
+    card_inputs = []
     
-    with sc2:
-        solver_input = st.text_input(
-            "輸入牌 (用空白分隔，如: A 5 5 10)", 
-            placeholder="例如: 3 3 8 8 或 A Q 5 10",
-            key="s_input"
-        )
+    for i in range(4):
+        with input_cols[i]:
+            val = st.text_input(f"第 {i+1} 張", placeholder="A", key=f"card_{i}")
+            card_inputs.append(val)
 
     if st.button("🚀 開始計算", type="primary", use_container_width=True):
-        if not solver_input:
-            st.warning("請輸入牌的數字！")
+        # 過濾掉空白輸入並組合字串
+        combined_input = " ".join([c for c in card_inputs if c.strip()])
+        
+        if not combined_input:
+            st.warning("請至少輸入幾張牌！")
         else:
             # 解析輸入
-            parsed_cards = parse_card_input(solver_input)
+            parsed_cards = parse_card_input(combined_input)
             
             if parsed_cards is None:
-                st.error("輸入格式錯誤！請輸入數字 (1-10) 或 J, Q, K, A。")
+                st.error("輸入格式錯誤！請輸入數字 (1-10) 或字母 A, J, Q, K。")
+            elif len(parsed_cards) < 2:
+                st.warning("請輸入至少兩張牌進行運算。")
             else:
-                st.info(f"正在計算 {len(parsed_cards)} 張牌組合: {[c['expr'] for c in parsed_cards]} ...")
+                st.info(f"正在計算組合: {[c['expr'] for c in parsed_cards]} 目標: {solver_target}")
                 
                 start_time = time.time()
-                # 呼叫核心演算法
                 result = solve_24(parsed_cards, solver_target)
                 end_time = time.time()
                 
                 st.divider()
                 if result:
-                    # 美化顯示
-                    final_ans = result
-                    if final_ans.startswith('(') and final_ans.endswith(')'):
-                        final_ans = final_ans[1:-1]
-                    
+                    display_ans = result[1:-1] if result.startswith('(') and result.endswith(')') else result
                     st.success(f"### 🎉 找到解答了！")
-                    st.code(f"{final_ans} = {solver_target}", language="text")
+                    st.code(f"{display_ans} = {solver_target}", language="text")
+                    st.balloons()
                 else:
-                    st.error(f"### ❌ 無解")
-                    st.write("這組數字無法透過加減乘除算出目標數字。")
+                    st.error(f"### ❌ 這組牌型在目標為 {solver_target} 時無解")
                 
                 st.caption(f"計算耗時: {end_time - start_time:.4f} 秒")
