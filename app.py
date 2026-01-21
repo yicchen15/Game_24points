@@ -104,6 +104,13 @@ def parse_card_input(input_str):
                 
     return parsed_nums
 
+
+def get_display_name(card, show_val):
+    mapping = {'A': 1, 'J': 11, 'Q': 12, 'K': 13}
+    if show_val and card in mapping:
+        return f"{card}({mapping[card]})"
+    return card
+    
 # ==========================================
 # Session State 初始化
 # ==========================================
@@ -136,7 +143,9 @@ with tab1:
         game_target = st.number_input("遊戲目標點數", value=24, step=1, key="g_target")
         game_cards_num = st.number_input("抽牌張數", value=4, min_value=2, max_value=6, step=1, key="g_num")
         game_time_s = st.number_input("倒數時間 (秒)", value=30, step=5, key="g_time")
-
+        # 在側邊欄新增一個勾選框
+        show_val = st.sidebar.checkbox("顯示字母數值 (如: J(11))", value=False)
+        
     col1, col2, col3 = st.columns([1, 1, 1])
 
     def start_new_game():
@@ -171,6 +180,16 @@ with tab1:
         # 顯示卡片
         c_cols = st.columns(len(st.session_state.current_cards))
         for idx, card in enumerate(st.session_state.current_cards):
+            # --- 新增處理邏輯 ---
+            display_text = card['display']
+            if show_val_hint:
+                # 這裡假設 card['value'] 存的是數字 (1-13)
+                # 且 card['display'] 的最後一個字元是 A, J, Q, K
+                rank = str(card['display'])[2:] # 取得花色後面的字，例如 'A' 或 '10'
+                if rank in ['A', 'J', 'Q', 'K']:
+                    display_text = f"{card['display']}({card['value']})"
+            # ------------------
+            
             with c_cols[idx]:
                 st.markdown(
                     f"""
