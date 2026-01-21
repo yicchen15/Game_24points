@@ -63,7 +63,7 @@ with st.sidebar:
 # ==========================================
 # 主畫面邏輯
 # ==========================================
-st.title("💣 拆彈專家：24點")
+st.title("🃏 24點撲克牌挑戰 ")
 
 # 自動刷新組件 (只在遊戲進行中且未爆炸時刷新)
 if st.session_state.is_playing and not st.session_state.is_exploded:
@@ -115,14 +115,21 @@ if st.session_state.start_time:
 
     # 狀態 2: 爆炸了 (Time's Up)
     if st.session_state.is_exploded:
-        st.markdown("""
-            <div style='text-align: center; padding: 20px; background-color: #ffcccc; border-radius: 10px; border: 3px solid red;'>
-                <div style='font-size: 60px;'>💥 BOOM! 💥</div>
-                <h3 style='color: #cc0000;'>時間到！任務失敗...</h3>
-                <p>別灰心，卡片還在下方，你可以繼續嘗試或查看解答。</p>
-            </div>
-            <br>
-        """, unsafe_allow_html=True)
+        st.error("💥 **BOOM! 時間到，任務失敗！** (卡片已保留，可繼續挑戰)")
+        # st.markdown("""
+        #     <div style='
+        #         text-align: center; 
+        #         padding: 10px; 
+        #         background-color: #fff0f0; 
+        #         border-radius: 8px; 
+        #         border: 2px solid #ff4b4b; 
+        #         margin-bottom: 5px;
+        #     '>
+        #         <div style='font-size: 32px; line-height: 1;'>💥 BOOM!</div>
+        #         <div style='color: #cc0000; font-weight: bold; font-size: 18px; margin: 5px 0;'>時間到！任務失敗</div>
+        #         <div style='font-size: 13px; color: #555; line-height: 1.2;'>卡片已保留，可繼續嘗試或查看解答。</div>
+        #     </div>
+        # """, unsafe_allow_html=True)
 
     # ==========================================
     # 遊戲操作區 (無論是否爆炸都保留顯示)
