@@ -1,213 +1,271 @@
 import streamlit as st
 import random
 import time
-import re
+import itertools
 from operator import add, sub, mul, truediv
-from streamlit_autorefresh import st_autorefresh
 
-# --- 頁面設定 ---
-st.set_page_config(page_title="24點撲克牌挑戰", page_icon="🃏", layout="centered")
+# --- 設定頁面資訊 ---
+st.set_page_config(page_title="24點撲克牌大師", page_icon="♠️", layout="centered")
 
-# --- CSS 注入：解決手機強制換行與字體大小問題 ---
-st.markdown("""
-    <style>
-    /* 1. 強制讓 columns 在手機上不換行 */
-    [data-testid="column"] {
-        flex: 1 1 0% !important;
-        min-width: 0px !important;
-    }
-    
-    /* 2. 撲克牌按鈕樣式調整 */
-    div.stButton > button {
-        font-size: 22px !important; /* 建議值：22px-26px */
-        font-weight: bold !important;
-        height: 70px !important;
-        border-radius: 10px !important;
-        padding: 5px !important;
-    }
-    
-    /* 讓按鈕內的換行符號生效 */
-    div.stButton > button p {
-        white-space: pre-line;
-        line-height: 1.1;
-    }
-    
-    /* 3. 算式顯示區優化 */
-    .formula-box {
-        background: #f8f9fa;
-        padding: 12px;
-        border-radius: 8px;
-        text-align: center;
-        font-size: 24px;
-        font-family: monospace;
-        border: 2px dashed #ccc;
-        margin: 10px 0;
-        min-height: 50px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# ==========================================
+# 核心邏輯區 (演算法與工具)
+# ==========================================
 
-# --- 核心演算法 ---
 def solve_24(nums, target=24):
-    if not nums: return None
+    """
+    通用遞迴求解器。
+    輸入: nums (list of dicts [{'val': float, 'expr': str}]), target (float)
+    輸出: 解答算式字串 or None
+    """
+    if not nums:
+        return None
+        
     if len(nums) == 1:
-        return nums[0]['expr'] if abs(nums[0]['val'] - target) < 1e-6 else None
+        if abs(nums[0]['val'] - target) < 1e-6:
+            return nums[0]['expr']
+        else:
+            return None
+
+    # 排列組合兩兩運算
     for i in range(len(nums)):
         for j in range(len(nums)):
             if i != j:
-                n1, n2 = nums[i], nums[j]
+                n1 = nums[i]
+                n2 = nums[j]
                 remaining = [nums[k] for k in range(len(nums)) if k != i and k != j]
-                for op_func, op_symbol in [(add, '+'), (sub, '-'), (mul, '*'), (truediv, '/')]:
-                    if op_symbol == '/' and abs(n2['val']) < 1e-6: continue
-                    res = solve_24(remaining + [{'val': op_func(n1['val'], n2['val']), 'expr': f"({n1['expr']}{op_symbol}{n2['expr']})"}], target)
-                    if res: return res
+                
+                ops = [(add, '+'), (sub, '-'), (mul, '*'), (truediv, '/')]
+                
+                for op_func, op_symbol in ops:
+                    # 避免除以零
+                    if op_symbol == '/' and abs(n2['val']) < 1e-6:
+                        continue
+                        
+                    new_val = op_func(n1['val'], n2['val'])
+                    # 加上括號保護優先順序
+                    new_expr = f"({n1['expr']} {op_symbol} {n2['expr']})"
+                    new_item = {'val': new_val, 'expr': new_expr}
+                    
+                    res = solve_24(remaining + [new_item], target)
+                    if res:
+                        return res
     return None
 
 def deal_cards(num_cards=4):
+    """隨機發牌"""
     suits = ['♠️', '♥️', '♦️', '♣️']
     ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
-    values = {'A':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13}
-    deck = [(s, r) for s in suits for r in ranks]
+    values = {
+        'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, 
+        '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13
+    }
+    deck = list(itertools.product(suits, ranks))
     drawn = random.sample(deck, num_cards)
-    return [{'display': f"{s}{r}", 'value': values[r], 'rank': r} for s, r in drawn]
-
-# --- Session State ---
-if 'start_time' not in st.session_state: st.session_state.start_time = None
-if 'current_cards' not in st.session_state: st.session_state.current_cards = []
-if 'formula' not in st.session_state: st.session_state.formula = []
-if 'msg' not in st.session_state: st.session_state.msg = None
-if 'reveal_answer' not in st.session_state: st.session_state.reveal_answer = False
-if 'is_playing' not in st.session_state: st.session_state.is_playing = False
-if 'is_exploded' not in st.session_state: st.session_state.is_exploded = False
-
-# ==========================================
-# 主畫面開始
-# ==========================================
-st.title("🃏 24點撲克牌挑戰")
-
-# --- 新增：頁面頂部摺疊選單 ---
-with st.expander("⚙️ 遊戲設置 (張數/目標/時間)", expanded=False):
-    c_set1, c_set2 = st.columns(2)
-    with c_set1:
-        g_num = st.number_input("🎴 抽牌張數", value=4, min_value=2, max_value=6)
-        g_target = st.number_input("🎯 目標點數", value=24)
-    with c_set2:
-        g_time = st.number_input("⏳ 倒數秒數", value=30, step=5)
-        show_hint = st.toggle("顯示字母提示", value=True)
-
-# 刷新組件
-if st.session_state.is_playing and not st.session_state.is_exploded:
-    st_autorefresh(interval=1000, key="gametimer")
-
-# --- 控制按鈕 ---
-c1, c2, c3 = st.columns(3)
-def init_game():
-    st.session_state.current_cards = deal_cards(g_num)
-    st.session_state.start_time = time.time()
-    st.session_state.formula = []
-    st.session_state.msg = None
-    st.session_state.reveal_answer = False
-    st.session_state.is_playing = True
-    st.session_state.is_exploded = False
-
-if c1.button("🔥 開始", use_container_width=True, type="primary"): init_game()
-if c2.button("👀 答案", use_container_width=True): 
-    st.session_state.reveal_answer = True
-    st.session_state.is_playing = False
-if c3.button("⏭️ 跳過", use_container_width=True): init_game()
-
-st.divider()
-
-if st.session_state.start_time:
-    # 爆炸與計時邏輯
-    elapsed = time.time() - st.session_state.start_time
-    remaining = int(g_time - elapsed)
     
-    if st.session_state.is_playing and not st.session_state.is_exploded:
-        if remaining > 0:
-            st.markdown(f"<h3 style='text-align: center; color: {'green' if remaining > 10 else 'red'};'>⏳ {remaining} 秒</h3>", unsafe_allow_html=True)
+    card_data = []
+    for suit, rank in drawn:
+        card_data.append({
+            'display': f"{suit}{rank}",
+            'value': values[rank],
+            'rank': rank
+        })
+    return card_data
+
+def parse_card_input(input_str):
+    """
+    解析使用者輸入的牌型字串 (例如: 'A 5 5 10' 或 'K q 3 3')
+    回傳: list of dicts [{'val': float, 'expr': str}]
+    """
+    if not input_str:
+        return None
+    
+    # 定義對照表
+    values = {
+        'A': 1, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, 
+        '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13
+    }
+    
+    # 分割並標準化
+    raw_items = input_str.strip().replace(',', ' ').split()
+    parsed_nums = []
+    
+    for item in raw_items:
+        key = item.upper()
+        if key in values:
+            val = values[key]
+            parsed_nums.append({'val': float(val), 'expr': str(val)})
         else:
-            st.session_state.is_playing = False
-            st.session_state.is_exploded = True
-            st.rerun()
-
-    if st.session_state.is_exploded:
-        st.markdown("""
-            <div style='text-align: center; padding: 10px; background-color: #fff0f0; border-radius: 8px; border: 2px solid #ff4b4b;'>
-                <div style='font-size: 32px;'>💥 BOOM!</div>
-                <div style='color: #cc0000; font-weight: bold;'>時間到！任務失敗</div>
-                <div style='font-size: 13px; color: #555;'>卡片已保留，可繼續嘗試。</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    # --- 1. 撲克牌區 (CSS 已強制水平) ---
-    st.write(" ")
-    cards = st.session_state.current_cards
-    cols = st.columns(4) 
-    for idx, card in enumerate(cards):
-        col_idx = idx % 4
-        # 如果牌數超過 4 張，這裡可以加邏輯換行，目前先處理前 4 張的橫向
-        label = card['display']
-        if show_hint and card['rank'] in ['A', 'J', 'Q', 'K']:
-            label = f"{card['display']}\n({card['value']})"
-        
-        if cols[col_idx].button(label, key=f"c_{idx}", use_container_width=True):
-            st.session_state.formula.append(str(card['value']))
-            st.rerun()
-
-    # --- 2. 運算符號區 (分兩排，強制每排 4 個) ---
-    st.write(" ")
-    op_set1 = [("➕", "+"), ("➖", "-"), ("✖️", "*"), ("➗", "/")]
-    op_set2 = [("(", "("), (")", ")"), ("⌫", "back"), ("🗑️", "clear")]
-
-    row1 = st.columns(4)
-    for i, (icon, sym) in enumerate(op_set1):
-        if row1[i].button(icon, key=f"op1_{i}", use_container_width=True):
-            st.session_state.formula.append(sym); st.rerun()
-
-    row2 = st.columns(4)
-    for i, (icon, sym) in enumerate(op_set2):
-        if row2[i].button(icon, key=f"op2_{i}", use_container_width=True):
-            if sym == "back":
-                if st.session_state.formula: st.session_state.formula.pop()
-            elif sym == "clear":
-                st.session_state.formula = []
-                st.session_state.msg = None
-            else:
-                st.session_state.formula.append(sym)
-            st.rerun()
-
-    # --- 3. 算式顯示區 ---
-    current_f = "".join(st.session_state.formula)
-    display_f = current_f.replace("*", "×").replace("/", "÷")
-    st.markdown(f"<div class='formula-box'>{display_f if display_f else '...'}</div>", unsafe_allow_html=True)
-
-    if st.button("✅ 檢查拆彈結果", use_container_width=True, type="primary"):
-        if current_f:
+            # 嘗試是否為純數字 (例如使用者輸入 13 代表 K)
             try:
-                used_nums = re.findall(r'\d+', current_f)
-                target_nums = [str(c['value']) for c in st.session_state.current_cards]
-                if sorted(used_nums) != sorted(target_nums):
-                    st.session_state.msg = ("error", "需用完所有數字！")
-                else:
-                    res = eval(current_f)
-                    if abs(res - g_target) < 1e-6:
-                        st.session_state.msg = ("success", "答對了！")
-                        if not st.session_state.is_exploded: st.balloons()
-                        st.session_state.is_playing = False
-                    else:
-                        st.session_state.msg = ("error", f"結果是 {res} ❌")
-            except: st.session_state.msg = ("error", "算式錯誤")
-        st.rerun()
+                val = float(item)
+                parsed_nums.append({'val': val, 'expr': str(int(val) if val.is_integer() else val)})
+            except ValueError:
+                return None # 解析失敗
+                
+    return parsed_nums
 
-    if st.session_state.msg:
-        tp, txt = st.session_state.msg
-        if tp == "success": st.success(txt)
-        else: st.error(txt)
+# ==========================================
+# Session State 初始化
+# ==========================================
+if 'game_active' not in st.session_state:
+    st.session_state.game_active = False
+if 'current_cards' not in st.session_state:
+    st.session_state.current_cards = []
+if 'solution' not in st.session_state:
+    st.session_state.solution = None
+if 'time_left' not in st.session_state:
+    st.session_state.time_left = 0
+if 'reveal_answer' not in st.session_state:
+    st.session_state.reveal_answer = False
 
-    if st.session_state.reveal_answer:
-        st.divider()
+# ==========================================
+# 介面佈局
+# ==========================================
+
+st.title("🃏 撲克牌神算 24點")
+
+# 建立兩個分頁
+tab1, tab2 = st.tabs(["🎮 挑戰模式", "🧮 解牌計算機"])
+
+# ------------------------------------------
+# 分頁 1: 遊戲模式 (原本的功能)
+# ------------------------------------------
+# --- 在「遊戲設定」區塊新增開關 ---
+with tab1:
+    with st.expander("⚙️ 遊戲設定 (點擊展開)", expanded=False):
+        game_target = st.number_input("遊戲目標點數", value=24, step=1, key="g_target")
+        game_cards_num = st.number_input("抽牌張數", value=4, min_value=2, max_value=6, step=1, key="g_num")
+        game_time_s = st.number_input("倒數時間 (秒)", value=60, step=5, key="g_time")
+        
+        # 新增功能開關：顯示字母對應數字
+        show_hint = st.toggle("當撲克牌為字母時顯示數字 (如: J → 11)", value=True)
+    col1, col2, col3 = st.columns([1, 1, 1])
+
+    def start_new_game():
+        st.session_state.current_cards = deal_cards(game_cards_num)
+        st.session_state.game_active = True
+        st.session_state.time_left = game_time_s
+        st.session_state.reveal_answer = False
+        st.session_state.solution = None
+        
+        # 預計算
         nums = [{'val': float(c['value']), 'expr': str(c['value'])} for c in st.session_state.current_cards]
-        ans = solve_24(nums, g_target)
-        if ans: st.info(f"💡 解答：{ans.replace('*','×').replace('/','÷')}")
-        else: st.warning("無解！")
+        sol = solve_24(nums, game_target)
+        st.session_state.solution = sol if sol else "無解"
+
+    with col1:
+        if st.button("發牌 / 開始", use_container_width=True, type="primary"):
+            start_new_game()
+
+    with col2:
+        btn_disabled = not st.session_state.game_active or st.session_state.reveal_answer
+        if st.button("👀 看解答", use_container_width=True, disabled=btn_disabled):
+            st.session_state.reveal_answer = True
+            st.rerun()
+
+    with col3:
+        if st.button("跳過 / 重來", use_container_width=True):
+            start_new_game()
+
+    # 遊戲畫面顯示
+
+    if st.session_state.game_active:
+        st.divider()
+        c_cols = st.columns(len(st.session_state.current_cards))
+        for idx, card in enumerate(st.session_state.current_cards):
+            with c_cols[idx]:
+                # 準備顯示文字
+                display_text = card['display']
+                
+                # 如果開啟了提示，且牌面是英文字母
+                if show_hint and card['rank'] in ['A', 'J', 'Q', 'K']:
+                    display_text = f"{card['display']} <span style='font-size: 14px; color: gray;'>({card['value']})</span>"
+                
+                # 渲染卡片
+                st.markdown(
+                    f"""
+                    <div style="
+                        border: 2px solid #ddd; border-radius: 8px; padding: 15px; 
+                        text-align: center; font-size: 20px; background: white;
+                        color: {'red' if card['display'][0] in ['♥️', '♦️'] else 'black'};
+                        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+                    ">
+                        {display_text}
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+        st.divider()
+
+        timer_placeholder = st.empty()
+        result_placeholder = st.empty()
+
+        # 顯示邏輯
+        if st.session_state.reveal_answer or st.session_state.time_left <= 0:
+            timer_placeholder.caption("🛑 計時結束")
+            sol = st.session_state.solution
+            if sol == "無解":
+                result_placeholder.warning("此局無解 😅")
+            else:
+                display_sol = sol[1:-1] if sol.startswith('(') and sol.endswith(')') else sol
+                result_placeholder.success(f"🎉 解答： {display_sol} = {game_target}")
+                if st.session_state.reveal_answer:
+                    st.balloons()
+        else:
+            # 倒數計時 Loop
+            for i in range(st.session_state.time_left, -1, -1):
+                timer_placeholder.progress(i / game_time_s, text=f"⏳ {i}s")
+                time.sleep(1)
+                st.session_state.time_left = i
+                if i == 0:
+                    st.rerun()
+
+# ------------------------------------------
+# 分頁 2: 解牌計算機 (優化四個空格輸入)
+# ------------------------------------------
+with tab2:
+    st.markdown("### 🧮 自定義解牌器")
+    st.caption("請在下方四個空格分別輸入牌面 (A, 2-10, J, Q, K)")
+    
+    # 目標點數設定
+    solver_target = st.number_input("目標點數", value=24, step=1, key="s_target_input")
+    
+    # 建立四個橫向排列的輸入框
+    input_cols = st.columns(4)
+    card_inputs = []
+    
+    for i in range(4):
+        with input_cols[i]:
+            val = st.text_input(f"第 {i+1} 張", placeholder="A", key=f"card_{i}")
+            card_inputs.append(val)
+
+    if st.button("🚀 開始計算", type="primary", use_container_width=True):
+        # 過濾掉空白輸入並組合字串
+        combined_input = " ".join([c for c in card_inputs if c.strip()])
+        
+        if not combined_input:
+            st.warning("請至少輸入幾張牌！")
+        else:
+            # 解析輸入
+            parsed_cards = parse_card_input(combined_input)
+            
+            if parsed_cards is None:
+                st.error("輸入格式錯誤！請輸入數字 (1-10) 或字母 A, J, Q, K。")
+            elif len(parsed_cards) < 2:
+                st.warning("請輸入至少兩張牌進行運算。")
+            else:
+                st.info(f"正在計算組合: {[c['expr'] for c in parsed_cards]} 目標: {solver_target}")
+                
+                start_time = time.time()
+                result = solve_24(parsed_cards, solver_target)
+                end_time = time.time()
+                
+                st.divider()
+                if result:
+                    display_ans = result[1:-1] if result.startswith('(') and result.endswith(')') else result
+                    st.success(f"### 🎉 找到解答了！")
+                    st.code(f"{display_ans} = {solver_target}", language="text")
+                    st.balloons()
+                else:
+                    st.error(f"### ❌ 這組牌型在目標為 {solver_target} 時無解")
+                
+                st.caption(f"計算耗時: {end_time - start_time:.4f} 秒")
