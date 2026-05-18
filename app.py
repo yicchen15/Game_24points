@@ -5,27 +5,46 @@ import itertools
 from operator import add, sub, mul, truediv
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="24點撲克牌大師", page_icon="♠️", layout="centered")
+st.set_page_config(page_title="24點撲克牌大師 Pro", page_icon="♠️", layout="centered")
 
 # ==========================================
-# 核心邏輯區 (保留不變)
+# 核心邏輯區：尋找所有可行解
 # ==========================================
 
-def solve_24(nums, target=24):
-    if not nums: return None
-    if len(nums) == 1:
-        return nums[0]['expr'] if abs(nums[0]['val'] - target) < 1e-6 else None
+def find_all_solutions(nums, target=24):
+    """
+    遞迴尋找所有不重複的運算式。
+    使用 set 儲存以避免字串完全相同的重複解。
+    """
+    results = set()
+    
+    def backtrack(current_nums):
+        if len(current_nums) == 1:
+            if abs(current_nums[0]['val'] - target) < 1e-6:
+                # 移除最外層不必要的括號
+                expr = current_nums[0]['expr']
+                if expr.startswith('(') and expr.endswith(')'):
+                    expr = expr[1:-1]
+                results.add(expr)
+            return
 
-    for i in range(len(nums)):
-        for j in range(len(nums)):
-            if i != j:
-                n1, n2 = nums[i], nums[j]
-                remaining = [nums[k] for k in range(len(nums)) if k != i and k != j]
-                for op_func, op_symbol in [(add, '+'), (sub, '-'), (mul, '*'), (truediv, '/')]:
-                    if op_symbol == '/' and abs(n2['val']) < 1e-6: continue
-                    res = solve_24(remaining + [{'val': op_func(n1['val'], n2['val']), 'expr': f"({n1['expr']} {op_symbol} {n2['expr']})"}], target)
-                    if res: return res
-    return None
+        for i in range(len(current_nums)):
+            for j in range(len(current_nums)):
+                if i != j:
+                    n1, n2 = current_nums[i], current_nums[j]
+                    remaining = [current_nums[k] for k in range(len(current_nums)) if k != i and k != j]
+                    
+                    # 四則運算
+                    ops = [(add, '+'), (sub, '-'), (mul, '*'), (truediv, '/')]
+                    for op_func, op_symbol in ops:
+                        if op_symbol == '/' and abs(n2['val']) < 1e-6: continue
+                        
+                        new_val = op_func(n1['val'], n2['val'])
+                        new_expr = f"({n1['expr']} {op_symbol} {n2['expr']})"
+                        backtrack(remaining + [{'val': new_val, 'expr': new_expr}])
+
+    backtrack(nums)
+    return sorted(list(results))
 
 def deal_cards(num_cards=4):
     suits, ranks = ['♠️', '♥️', '♦️', '♣️'], ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
@@ -53,32 +72,72 @@ def parse_card_input(input_str):
 # ==========================================
 # Session State 初始化
 # ==========================================
-for key, val in [('game_active', False), ('current_cards', []), ('solution', None), 
-                ('time_left', 0), ('reveal_answer', False)]:
+init_states = {
+    'game_active': False, 
+    'current_cards': [], 
+    'all_solutions': [], 
+    'time_left': 0, 
+    'reveal_answer': False,
+    'difficulty_level': '普通'
+}
+for key, val in init_states.items():
     if key not in st.session_state: st.session_state[key] = val
 
 # ==========================================
 # 介面佈局
 # ==========================================
 
-st.title("🃏 撲克牌神算 24點")
+st.title("🃏 撲克牌神算 24點 Pro")
 tab1, tab2 = st.tabs(["🎮 挑戰模式", "🧮 解牌計算機"])
 
 with tab1:
-    with st.expander("⚙️ 遊戲設定 (點擊展開)", expanded=False):
-        game_target = st.number_input("遊戲目標點數", value=24, step=1, key="g_target")
-        game_cards_num = st.number_input("抽牌張數", value=4, min_value=2, max_value=6, step=1, key="g_num")
-        game_time_s = st.number_input("倒數時間 (秒)", value=30, step=5, key="g_time")
-        show_hint = st.toggle("當撲克牌為字母時顯示數字 (如: J → 11)", value=True)
+    with st.expander("⚙️ 遊戲設定", expanded=False):
+        col_set1, col_set2 = st.columns(2)
+        with col_set1:
+            game_target = st.number_input("遊戲目標點數", value=24, step=1)
+            game_cards_num = st.number_input("抽牌張數", value=4, min_value=2, max_value=5, step=1)
+            diff_opt = st.selectbox("題目難度", ["容易 (15組解以上)", "普通 (10-15組解)", "困難 (4-9組解)", "SSS (3組解以內)"], index=1)
+        with col_set2:
+            game_time_s = st.number_input("倒數時間 (秒)", value=30, step=5)
+            allow_no_sol = st.toggle("包含無解題目", value=False)
+            show_hint = st.toggle("顯示牌面數字", value=True)
 
     def start_new_game():
-        st.session_state.current_cards = deal_cards(game_cards_num)
+        # 難度範圍定義
+        diff_map = {
+            "容易 (15組解以上)": (15, 999),
+            "普通 (10-15組解)": (10, 14),
+            "困難 (4-9組解)": (4, 9),
+            "SSS (3組解以內)": (1, 3)
+        }
+        min_sols, max_sols = diff_map[diff_opt]
+        
+        attempt = 0
+        while attempt < 100: # 防止無窮迴圈
+            cards = deal_cards(game_cards_num)
+            nums = [{'val': float(c['value']), 'expr': str(c['value'])} for c in cards]
+            sols = find_all_solutions(nums, game_target)
+            
+            num_sols = len(sols)
+            
+            # 判斷邏輯：
+            # 1. 如果允許無解且抽到無解
+            if allow_no_sol and num_sols == 0:
+                break
+            # 2. 如果不允許無解，則必須符合難度區間
+            if not allow_no_sol and (min_sols <= num_sols <= max_sols):
+                break
+            # 3. 如果允許無解但這次抽到有解，也要符合難度區間
+            if allow_no_sol and num_sols > 0 and (min_sols <= num_sols <= max_sols):
+                break
+                
+            attempt += 1
+
+        st.session_state.current_cards = cards
+        st.session_state.all_solutions = sols
         st.session_state.game_active = True
         st.session_state.time_left = game_time_s
         st.session_state.reveal_answer = False
-        nums = [{'val': float(c['value']), 'expr': str(c['value'])} for c in st.session_state.current_cards]
-        sol = solve_24(nums, game_target)
-        st.session_state.solution = sol if sol else "無解"
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -94,7 +153,6 @@ with tab1:
             start_new_game()
             st.rerun()
 
-    # --- 關鍵修正區：使用 fragment 包裹遊戲核心區 ---
     @st.fragment
     def game_render_loop():
         if st.session_state.game_active:
@@ -111,20 +169,21 @@ with tab1:
             timer_placeholder = st.empty()
             result_placeholder = st.empty()
 
-            # 判斷是否需要倒數
             if st.session_state.reveal_answer or st.session_state.time_left <= 0:
-                timer_placeholder.caption("🛑 計時結束")
-                sol = st.session_state.solution
-                if sol == "無解": result_placeholder.warning("此局無解 😅")
+                timer_placeholder.caption("🛑 狀態：已顯示解答")
+                sols = st.session_state.all_solutions
+                if not sols:
+                    result_placeholder.warning("此局無解 😅")
                 else:
-                    display_sol = sol[1:-1] if sol.startswith('(') and sol.endswith(')') else sol
-                    result_placeholder.success(f"🎉 解答： {display_sol} = {game_target}")
-                    if st.session_state.reveal_answer: st.balloons()
+                    with result_placeholder.container():
+                        st.success(f"🎉 找到 {len(sols)} 組可行解答：")
+                        # 使用 columns 或多行顯示所有解答
+                        st.code("\n".join([f"{s} = {game_target}" for s in sols]), language="text")
+                    # if st.session_state.reveal_answer: st.balloons()
             else:
-                # 在 Fragment 內的局部倒數迴圈
                 for i in range(st.session_state.time_left, -1, -1):
                     st.session_state.time_left = i
-                    timer_placeholder.progress(i / game_time_s, text=f"⏳ {i}s")
+                    timer_placeholder.progress(i / game_time_s, text=f"⏳ 剩餘時間: {i}s")
                     if st.session_state.reveal_answer: break
                     time.sleep(1)
                 if st.session_state.time_left == 0:
@@ -133,11 +192,12 @@ with tab1:
     game_render_loop()
 
 # ------------------------------------------
-# 分頁 2: 解牌計算機 (版面保持不變)
+# 分頁 2: 解牌計算機
 # ------------------------------------------
 with tab2:
-    st.markdown("### 🧮 自定義解牌器")
-    st.caption("請在下方四個空格分別輸入牌面 (A, 2-10, J, Q, K)")
+    st.markdown("### 🧮 全功能解牌器")
+    st.caption("輸入牌面 (A, 2-10, J, Q, K)，系統將列出所有可能的組合")
+    
     solver_target = st.number_input("目標點數", value=24, step=1, key="s_target_input")
     input_cols = st.columns(4)
     card_inputs = [input_cols[i].text_input(f"第 {i+1} 張", placeholder="A", key=f"card_{i}") for i in range(4)]
@@ -148,18 +208,21 @@ with tab2:
             st.warning("請至少輸入幾張牌！")
         else:
             parsed_cards = parse_card_input(combined_input)
-            if parsed_cards is None: st.error("輸入格式錯誤！請輸入數字 (1-10) 或字母 A, J, Q, K。")
-            elif len(parsed_cards) < 2: st.warning("請輸入至少兩張牌進行運算。")
+            if parsed_cards is None: 
+                st.error("輸入格式錯誤！")
+            elif len(parsed_cards) < 2: 
+                st.warning("請輸入至少兩張牌。")
             else:
-                st.info(f"正在計算組合: {[c['expr'] for c in parsed_cards]} 目標: {solver_target}")
+                st.info(f"正在分析組合... 目標: {solver_target}")
                 start_time = time.time()
-                result = solve_24(parsed_cards, solver_target)
+                all_res = find_all_solutions(parsed_cards, solver_target)
                 end_time = time.time()
+                
                 st.divider()
-                if result:
-                    display_ans = result[1:-1] if result.startswith('(') and result.endswith(')') else result
-                    st.success(f"### 🎉 找到解答了！")
-                    st.code(f"{display_ans} = {solver_target}", language="text")
-                    st.balloons()
-                else: st.error(f"### ❌ 這組牌型在目標為 {solver_target} 時無解")
+                if all_res:
+                    st.success(f"### ✨ 找到 {len(all_res)} 組解答")
+                    # 計算機模式不噴氣球，直接列出結果
+                    st.code("\n".join([f"{r} = {solver_target}" for r in all_res]), language="text")
+                else: 
+                    st.error(f"### ❌ 這組牌型在目標為 {solver_target} 時無解")
                 st.caption(f"計算耗時: {end_time - start_time:.4f} 秒")
